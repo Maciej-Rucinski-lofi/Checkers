@@ -1,7 +1,7 @@
 import cors from "cors";
 import express, { type Request, type Response } from "express";
 import { getGamesPlayed, insertExperience } from "./db.js";
-import { ensureDataDir, getModelFiles, loadOrCreateModel, saveModel } from "./model.js";
+import { ensureDataDir, getModelPayload, loadOrCreateModel, saveModel } from "./model.js";
 import { trainModel } from "./trainer.js";
 
 const app = express();
@@ -17,9 +17,9 @@ let model = await loadOrCreateModel();
 
 // Save a fresh model to disk on first run so GET /model works immediately
 try {
-  getModelFiles();
+  getModelPayload();
 } catch {
-  await saveModel(model);
+  saveModel(model);
 }
 
 interface ExperienceBody {
@@ -33,9 +33,9 @@ interface ExperienceBody {
  */
 app.get("/model", (_req: Request, res: Response) => {
   try {
-    const files = getModelFiles();
-    res.json(files);
-  } catch (err) {
+    const payload = getModelPayload();
+    res.json(payload);
+  } catch {
     res.status(503).json({ error: "Model not ready yet" });
   }
 });

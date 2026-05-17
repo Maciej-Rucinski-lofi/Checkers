@@ -1,10 +1,12 @@
-import * as tf from "@tensorflow/tfjs-node";
+import * as tf from "@tensorflow/tfjs";
 import * as fs from "fs";
 import * as path from "path";
 import { INPUT_SIZE } from "./encoding.js";
 
 const DATA_DIR = path.resolve("data");
 const MODEL_DIR = path.join(DATA_DIR, "model");
+const TOPOLOGY_PATH = path.join(MODEL_DIR, "topology.json");
+const WEIGHTS_PATH = path.join(MODEL_DIR, "weights.json");
 
 export function ensureDataDir(): void {
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -19,17 +21,21 @@ export function createModel(): tf.LayersModel {
       tf.layers.dense({ units: 1, activation: "tanh" }),
     ],
   });
-
   model.compile({ optimizer: tf.train.adam(0.001), loss: "meanSquaredError" });
   return model;
 }
 
 export async function loadOrCreateModel(): Promise<tf.LayersModel> {
-  const modelJsonPath = path.join(MODEL_DIR, "model.json");
-
-  if (fs.existsSync(modelJsonPath)) {
+  if (fs.existsSync(TOPOLOGY_PATH) && fs.existsSync(WEIGHTS_PATH)) {
     try {
-      const model = await tf.loadLayersModel(`file://${modelJsonPath}`);
+      const topology = JSON.parse(fs.readFileSync(TOPOLOGY_PATH, "utf-8")) as tf.io.ModelJSON;
+      const weightValues = JSON.parse(fs.readFileSync(WEIGHTS_PATH, "utf-8")) as number[][];
+
+      const model = await tf.models.modelFromJSON(topology);
+      const weightTensors = weightValues.map((w) => tf.tensor(w));
+      model.setWeights(weightTensors);
+      weightTensors.forEach((t) => t.dispose());
+
       model.compile({ optimizer: tf.train.adam(0.001), loss: "meanSquaredError" });
       console.log("Loaded existing model from disk.");
       return model;
@@ -42,26 +48,26 @@ export async function loadOrCreateModel(): Promise<tf.LayersModel> {
   return createModel();
 }
 
-export async function saveModel(model: tf.LayersModel): Promise<void> {
-  await model.save(`file://${MODEL_DIR}`);
+export function saveModel(model: tf.LayersModel): void {
+  ensureDataDir();
+
+  const topology = model.toJSON(null, false) as unknown as tf.io.ModelJSON;
+  fs.writeFileSync(TOPOLOGY_PATH, JSON.stringify(topology));
+
+  const weights = model.getWeights();
+  const weightValues = weights.map((w) => Array.from(w.dataSync()));
+  weights.forEach((w) => w.dispose());
+  fs.writeFileSync(WEIGHTS_PATH, JSON.stringify(weightValues));
 }
 
-/** Returns model.json + weight shard contents as a JSON-serialisable object. */
-export function getModelFiles(): { modelJson: unknown; weightData: string } {
-  const modelJsonPath = path.join(MODEL_DIR, "model.json");
-  const weightShardPath = path.join(MODEL_DIR, "weights.bin");
-
-  if (!fs.existsSync(modelJsonPath)) {
+/** Returns model topology + weights as a JSON-serialisable object for the browser. */
+export function getModelPayload(): { topology: tf.io.ModelJSON; weightValues: number[][] } {
+  if (!fs.existsSync(TOPOLOGY_PATH) || !fs.existsSync(WEIGHTS_PATH)) {
     throw new Error("Model not saved yet");
   }
 
-  const modelJson = JSON.parse(fs.readFileSync(modelJsonPath, "utf-8")) as unknown;
-  const weightBuffer = fs.existsSync(weightShardPath)
-    ? fs.readFileSync(weightShardPath)
-    : Buffer.alloc(0);
-
   return {
-    modelJson,
-    weightData: weightBuffer.toString("base64"),
+    topology: JSON.parse(fs.readFileSync(TOPOLOGY_PATH, "utf-8")) as tf.io.ModelJSON,
+    weightValues: JSON.parse(fs.readFileSync(WEIGHTS_PATH, "utf-8")) as number[][],
   };
 }

@@ -1,4 +1,4 @@
-import * as tf from "@tensorflow/tfjs-node";
+import * as tf from "@tensorflow/tfjs";
 import { getRecentExperiences } from "./db.js";
 import { saveModel } from "./model.js";
 
@@ -43,7 +43,7 @@ export async function trainModel(model: tf.LayersModel): Promise<void> {
     xs.dispose();
     ys.dispose();
 
-    await saveModel(model);
+    saveModel(model);
     console.log("Training complete, model saved.");
   } finally {
     trainingInProgress = false;
