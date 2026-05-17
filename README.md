@@ -1,118 +1,60 @@
-# Checkers
+# Checkers vs AI — Monorepo
 
-A browser-based American checkers game built with React. Play against a neural-network AI as **Red**; **Black** is controlled by the computer and improves the more you play.
+Browser-based American checkers game with a **globally shared neural-network AI**. Every game played by any user is sent to a central server, which retrains the model so the AI improves for everyone.
 
-## Tech stack
-
-| Layer | Technology |
-|-------|------------|
-| UI | [React](https://react.dev/) 19 |
-| Language | [TypeScript](https://www.typescriptlang.org/) 5.8 |
-| Build tool | [Vite](https://vite.dev/) 6 |
-| Styling | [Tailwind CSS](https://tailwindcss.com/) 4 (`@tailwindcss/vite`) |
-| AI / ML | [TensorFlow.js](https://www.tensorflow.org/js) — value network trained in the browser |
-
-## Prerequisites
-
-- [Node.js](https://nodejs.org/) LTS (includes `npm`)
-
-After installing Node.js, restart your terminal or IDE so `node` and `npm` are on your PATH.
-
-### Windows notes
-
-If PowerShell blocks `npm` with an execution policy error, use either:
-
-```powershell
-npm.cmd run dev
+```
+checkers-ai-engineering/
+├── frontend/   React + Vite + TF.js UI (deploy to Vercel / Netlify)
+└── server/     Express + TF.js Node backend (deploy to Railway / Render)
 ```
 
-or allow scripts for your user (one-time):
+## Quick start (local)
 
-```powershell
-Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
-```
-
-## Getting started
+**Terminal 1 — start the server:**
 
 ```bash
-# Install dependencies
+cd server
 npm install
-
-# Start the dev server
 npm run dev
+# Running at http://localhost:3001
 ```
 
-Open the URL shown in the terminal (usually [http://localhost:5173](http://localhost:5173)).
-
-### Other scripts
+**Terminal 2 — start the frontend:**
 
 ```bash
-npm run build    # Type-check and build for production
-npm run preview  # Preview the production build locally
+cd frontend
+npm install
+# .env.local already points to http://localhost:3001
+npm run dev
+# Open http://localhost:5173
 ```
 
-## How to play
-
-### You vs AI
-
-| Side | Player |
-|------|--------|
-| **Red** (bottom) | You |
-| **Black** (top) | Neural-network AI |
-
-**Black moves first.** When it is the AI’s turn, the board is not clickable. After each finished game, the network trains on that game and all previous games stored in your browser.
-
-The AI uses a small amount of **exploration** (random moves) early on; that rate drops as you play more games, so it relies more on what it has learned.
-
-Use **New game** to reset the board and play again.
-
-### Making a move (Red / human)
-
-1. Click one of your red pieces (yellow highlight).
-2. **Green dots** show legal destinations.
-3. Click a highlighted square to move.
-
-Click elsewhere to deselect (unless you must continue a jump).
-
-### Rules
-
-| Rule | Description |
-|------|-------------|
-| Men (non-kings) | Move one square diagonally **forward** on a non-capture turn. |
-| Captures | Jump over an adjacent opponent piece to an empty square behind it. Men may capture **forward and backward**. |
-| Mandatory capture | If any capture is available, you must jump — regular moves are not allowed. |
-| Multi-jump | After a capture, if the same piece can jump again, you **must** continue with that piece until no further jumps are possible. |
-| Kings | Crowned when a man reaches the opposite back row. Kings slide **any number of squares** along a diagonal. They may capture by jumping an opponent and landing on **any empty square** beyond it on that line, and can chain multiple jumps like men. |
-
-Kings are shown with a gold crown icon on the piece.
-
-## How the AI learns
-
-1. Before each Black move, the board is encoded as a 128-number feature vector (32 dark squares × 4 piece types).
-2. A feedforward network (128 → 64 → 32 → 1) estimates how good the position is for Black.
-3. The AI picks the move whose resulting board scores highest (with occasional random moves for exploration).
-4. When a game ends, every position from Black’s turns is labeled **+1** if Black won or **−1** if Red won.
-5. The network is retrained on the last **80 games** (stored in `localStorage`) and weights are saved in the browser.
-
-No server or dataset download is required — learning happens entirely on your machine.
-
-## Project structure
+## Architecture
 
 ```
-src/
-├── App.tsx              # Human vs AI flow, training triggers
-├── ai/
-│   ├── encoding.ts      # Board → neural network input
-│   ├── model.ts         # TensorFlow.js model load/save
-│   ├── player.ts        # Move selection for Black
-│   ├── trainer.ts       # Post-game training
-│   └── experience.ts    # Replay buffer (localStorage)
-├── components/
-│   └── Board.tsx        # 8×8 board UI
-└── game/
-    └── checkers.ts      # Rules engine
+Browser  ──GET /model──────► Server (Express + TF.js Node)
+         ◄── weights ──────      │
+                                  │ trains on received games
+         ──POST /experiences──►   │ saves model to data/model/
+                                  │
+         ──GET /stats ────────►   └── data/experiences.json
+                                      data/meta.json
 ```
 
-## License
+- The **server** owns and trains the model. Weights are stored on disk.
+- The **browser** downloads weights at startup, uses TF.js for inference, and POSTs game results after each game.
+- No local training happens in the browser — all learning is centralised.
 
-Private project — not published to npm.
+## Deployment
+
+| Part | Host | Notes |
+|------|------|-------|
+| `frontend/` | Vercel / Netlify | Static site, set `VITE_API_URL` env var |
+| `server/` | Railway / Render | Needs a persistent volume at `/app/data` |
+
+See each subdirectory's `README.md` for detailed deployment instructions.
+
+## Docs
+
+- [frontend/README.md](frontend/README.md) — UI setup, how to play, project structure
+- [server/README.md](server/README.md) — API endpoints, training loop, deployment

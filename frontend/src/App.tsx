@@ -2,16 +2,9 @@ import type * as tf from "@tensorflow/tfjs";
 import { useCallback, useEffect, useRef, useState } from "react";
 import Board from "./components/Board";
 import { encodeBoard } from "./ai/encoding";
-import {
-  incrementGamesPlayed,
-  loadExperiences,
-  loadGamesPlayed,
-  saveExperiences,
-  type GameExperience,
-} from "./ai/experience";
+import { postExperience, loadGamesPlayed, type GameExperience } from "./ai/experience";
 import { loadOrCreateModel } from "./ai/model";
 import { chooseBlackMove, explorationRate } from "./ai/player";
-import { trainOnExperiences } from "./ai/trainer";
 import {
   applyMove,
   createInitialBoard,
@@ -31,36 +24,32 @@ type GameStatus = "playing" | "red-wins" | "black-wins";
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+function randomFirstPlayer(): Player {
+  return Math.random() < 0.5 ? "black" : "red";
+}
+
 export default function App() {
   const [model, setModel] = useState<tf.LayersModel | null>(null);
   const [modelReady, setModelReady] = useState(false);
   const [gamesPlayed, setGamesPlayed] = useState(0);
-  const [isTraining, setIsTraining] = useState(false);
+  const [isSending, setIsSending] = useState(false);
   const [aiThinking, setAiThinking] = useState(false);
   const [status, setStatus] = useState<GameStatus>("playing");
 
   const [board, setBoard] = useState<BoardState>(createInitialBoard);
-  const [turn, setTurn] = useState<Player>("black");
+  const [turn, setTurn] = useState<Player>(randomFirstPlayer);
   const [selected, setSelected] = useState<Position | null>(null);
   const [legalMoves, setLegalMoves] = useState<Move[]>([]);
-  const [mustContinueFrom, setMustContinueFrom] = useState<Position | null>(
-    null,
-  );
+  const [mustContinueFrom, setMustContinueFrom] = useState<Position | null>(null);
 
   const modelRef = useRef<tf.LayersModel | null>(null);
-  const experiencesRef = useRef<GameExperience[]>([]);
   const blackStatesRef = useRef<Float32Array[]>([]);
   const gamesPlayedRef = useRef(0);
   const statusRef = useRef<GameStatus>("playing");
   const aiRunningRef = useRef(false);
 
-  useEffect(() => {
-    statusRef.current = status;
-  }, [status]);
-
-  useEffect(() => {
-    gamesPlayedRef.current = gamesPlayed;
-  }, [gamesPlayed]);
+  useEffect(() => { statusRef.current = status; }, [status]);
+  useEffect(() => { gamesPlayedRef.current = gamesPlayed; }, [gamesPlayed]);
 
   const resetSelection = useCallback(() => {
     setSelected(null);
@@ -76,23 +65,18 @@ export default function App() {
     const states = blackStatesRef.current;
     blackStatesRef.current = [];
 
-    if (states.length === 0 || !modelRef.current) return;
-
-    const newExperience: GameExperience = { states, outcome };
-    const allExperiences = [...experiencesRef.current, newExperience];
-    experiencesRef.current = allExperiences;
-    saveExperiences(allExperiences);
-
-    setIsTraining(true);
-    try {
-      await trainOnExperiences(modelRef.current, allExperiences);
-    } finally {
-      setIsTraining(false);
+    if (states.length > 0) {
+      const experience: GameExperience = { states, outcome };
+      setIsSending(true);
+      try {
+        await postExperience(experience);
+        const count = await loadGamesPlayed();
+        gamesPlayedRef.current = count;
+        setGamesPlayed(count);
+      } finally {
+        setIsSending(false);
+      }
     }
-
-    const count = incrementGamesPlayed();
-    gamesPlayedRef.current = count;
-    setGamesPlayed(count);
   }, [resetSelection]);
 
   const runAiTurn = useCallback(
@@ -108,8 +92,7 @@ export default function App() {
 
       try {
         while (statusRef.current === "playing") {
-          const winnerBeforeMove = getWinner(currentBoard, "black");
-          if (winnerBeforeMove === "red") {
+          if (getWinner(currentBoard, "black") === "red") {
             await finishGame("red");
             return;
           }
@@ -140,8 +123,7 @@ export default function App() {
 
           setMustContinueFrom(null);
 
-          const winnerAfterMove = getWinner(currentBoard, "red");
-          if (winnerAfterMove === "black") {
+          if (getWinner(currentBoard, "red") === "black") {
             await finishGame("black");
             return;
           }
@@ -159,14 +141,15 @@ export default function App() {
 
   const startNewGame = useCallback(() => {
     const fresh = createInitialBoard();
+    const first = randomFirstPlayer();
     blackStatesRef.current = [];
     setBoard(fresh);
-    setTurn("black");
+    setTurn(first);
     setStatus("playing");
     statusRef.current = "playing";
     setMustContinueFrom(null);
     resetSelection();
-    void runAiTurn(fresh, null);
+    if (first === "black") void runAiTurn(fresh, null);
   }, [resetSelection, runAiTurn]);
 
   useEffect(() => {
@@ -176,24 +159,20 @@ export default function App() {
       setModel(loadedModel);
       setModelReady(true);
 
-      const experiences = loadExperiences();
-      experiencesRef.current = experiences;
-      setGamesPlayed(loadGamesPlayed());
+      const count = await loadGamesPlayed();
+      gamesPlayedRef.current = count;
+      setGamesPlayed(count);
 
-      void runAiTurn(createInitialBoard(), null);
+      setTurn((current) => {
+        if (current === "black") void runAiTurn(createInitialBoard(), null);
+        return current;
+      });
     })();
   }, [runAiTurn]);
 
   const handleSquareClick = useCallback(
     (row: number, col: number) => {
-      if (
-        status !== "playing" ||
-        turn !== "red" ||
-        aiThinking ||
-        isTraining
-      ) {
-        return;
-      }
+      if (status !== "playing" || turn !== "red" || aiThinking || isSending) return;
 
       const clicked: Position = { row, col };
       const piece = board[row][col];
@@ -207,12 +186,7 @@ export default function App() {
           setMustContinueFrom(matchingMove.to);
           setSelected(matchingMove.to);
           setLegalMoves(
-            getLegalMovesForSelection(
-              nextBoard,
-              "red",
-              matchingMove.to,
-              matchingMove.to,
-            ),
+            getLegalMovesForSelection(nextBoard, "red", matchingMove.to, matchingMove.to),
           );
           return;
         }
@@ -220,8 +194,7 @@ export default function App() {
         setMustContinueFrom(null);
         resetSelection();
 
-        const winner = getWinner(nextBoard, "black");
-        if (winner === "red") {
+        if (getWinner(nextBoard, "black") === "red") {
           void finishGame("red");
           return;
         }
@@ -235,11 +208,7 @@ export default function App() {
 
       if (piece && getOwner(piece) === "red") {
         const allMoves = getAllLegalMoves(board, "red");
-        const pieceHasMove = allMoves.some(
-          (m) => m.from.row === row && m.from.col === col,
-        );
-        if (!pieceHasMove) return;
-
+        if (!allMoves.some((m) => m.from.row === row && m.from.col === col)) return;
         setSelected(clicked);
         setLegalMoves(getLegalMovesForSelection(board, "red", clicked, null));
         return;
@@ -247,30 +216,19 @@ export default function App() {
 
       resetSelection();
     },
-    [
-      board,
-      turn,
-      status,
-      selected,
-      legalMoves,
-      mustContinueFrom,
-      aiThinking,
-      isTraining,
-      resetSelection,
-      finishGame,
-      runAiTurn,
-    ],
+    [board, turn, status, selected, legalMoves, mustContinueFrom, aiThinking, isSending,
+      resetSelection, finishGame, runAiTurn],
   );
 
   const statusMessage =
     status === "red-wins"
-      ? "You win! The AI is learning from this game."
+      ? "You win! Sending game to server…"
       : status === "black-wins"
-        ? "AI wins! It learned from this game."
+        ? "AI wins! Sending game to server…"
         : aiThinking
           ? "AI is thinking…"
-          : isTraining
-            ? "Training neural network…"
+          : isSending
+            ? "Sending game to server…"
             : turn === "red"
               ? "Your turn (Red)"
               : "AI is moving (Black)";
@@ -278,14 +236,12 @@ export default function App() {
   return (
     <div className="flex min-h-dvh w-full max-w-full flex-col items-center justify-center gap-3 bg-neutral-100 px-3 py-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))] sm:gap-6 sm:px-4">
       <div className="w-full max-w-md text-center">
-        <h1 className="text-xl font-bold text-neutral-900 sm:text-2xl">
-          Checkers vs AI
-        </h1>
+        <h1 className="text-xl font-bold text-neutral-900 sm:text-2xl">Checkers vs AI</h1>
         <p className="mt-1 text-xs leading-relaxed text-neutral-600 sm:text-sm">
           You play Red · AI plays Black
           <br className="sm:hidden" />
           <span className="hidden sm:inline"> · </span>
-          Games trained: {gamesPlayed}
+          Global games played: {gamesPlayed}
           {!modelReady && " · Loading model…"}
         </p>
       </div>
@@ -307,7 +263,7 @@ export default function App() {
         <button
           type="button"
           onClick={startNewGame}
-          disabled={aiThinking || isTraining}
+          disabled={aiThinking || isSending}
           className="min-h-11 w-full max-w-xs rounded-lg bg-neutral-800 px-4 py-2.5 text-sm font-medium text-white active:bg-neutral-600 disabled:opacity-50 sm:w-auto sm:hover:bg-neutral-700"
         >
           New game
