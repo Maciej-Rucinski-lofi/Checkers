@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 
-const DATA_DIR = path.resolve("data");
+const DATA_DIR = process.env.DATA_DIR ?? path.resolve("data");
 const DB_PATH = path.join(DATA_DIR, "experiences.json");
 const META_PATH = path.join(DATA_DIR, "meta.json");
 

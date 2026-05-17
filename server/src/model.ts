@@ -3,7 +3,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { INPUT_SIZE } from "./encoding.js";
 
-const DATA_DIR = path.resolve("data");
+const DATA_DIR = process.env.DATA_DIR ?? path.resolve("data");
 const MODEL_DIR = path.join(DATA_DIR, "model");
 const TOPOLOGY_PATH = path.join(MODEL_DIR, "topology.json");
 const WEIGHTS_PATH = path.join(MODEL_DIR, "weights.json");
