@@ -276,37 +276,44 @@ export default function App() {
               : "AI is moving (Black)";
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center gap-6 bg-neutral-100 p-4">
-      <div className="text-center">
-        <h1 className="text-2xl font-bold text-neutral-900">Checkers vs AI</h1>
-        <p className="mt-1 text-sm text-neutral-600">
-          You play Red · AI plays Black · Games trained: {gamesPlayed}
+    <div className="flex min-h-dvh w-full max-w-full flex-col items-center justify-center gap-3 bg-neutral-100 px-3 py-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))] sm:gap-6 sm:px-4">
+      <div className="w-full max-w-md text-center">
+        <h1 className="text-xl font-bold text-neutral-900 sm:text-2xl">
+          Checkers vs AI
+        </h1>
+        <p className="mt-1 text-xs leading-relaxed text-neutral-600 sm:text-sm">
+          You play Red · AI plays Black
+          <br className="sm:hidden" />
+          <span className="hidden sm:inline"> · </span>
+          Games trained: {gamesPlayed}
           {!modelReady && " · Loading model…"}
         </p>
       </div>
 
-      <Board
-        board={board}
-        turn={turn}
-        selected={selected}
-        legalMoves={legalMoves}
-        mustContinueFrom={mustContinueFrom}
-        onSquareClick={handleSquareClick}
-        interactive={turn === "red" && status === "playing" && !aiThinking}
-        statusMessage={statusMessage}
-      />
+      <div className="w-full max-w-md">
+        <Board
+          board={board}
+          turn={turn}
+          selected={selected}
+          legalMoves={legalMoves}
+          mustContinueFrom={mustContinueFrom}
+          onSquareClick={handleSquareClick}
+          interactive={turn === "red" && status === "playing" && !aiThinking}
+          statusMessage={statusMessage}
+        />
+      </div>
 
-      <div className="flex flex-wrap justify-center gap-3">
+      <div className="flex w-full max-w-md flex-col items-center gap-2 sm:flex-row sm:flex-wrap sm:justify-center sm:gap-3">
         <button
           type="button"
           onClick={startNewGame}
           disabled={aiThinking || isTraining}
-          className="rounded-lg bg-neutral-800 px-4 py-2 text-sm font-medium text-white hover:bg-neutral-700 disabled:opacity-50"
+          className="min-h-11 w-full max-w-xs rounded-lg bg-neutral-800 px-4 py-2.5 text-sm font-medium text-white active:bg-neutral-600 disabled:opacity-50 sm:w-auto sm:hover:bg-neutral-700"
         >
           New game
         </button>
         {model && (
-          <span className="self-center text-xs text-neutral-500">
+          <span className="text-center text-xs text-neutral-500">
             Exploration: {(explorationRate(gamesPlayed) * 100).toFixed(0)}%
           </span>
         )}

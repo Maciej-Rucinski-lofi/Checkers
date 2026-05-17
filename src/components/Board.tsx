@@ -51,13 +51,15 @@ export default function Board({
   const targetKeys = new Set(legalMoves.map((m) => posKey(m.to)));
 
   return (
-    <div className="flex flex-col items-center gap-4">
-      <p className="text-sm font-medium text-neutral-700">{statusMessage}</p>
+    <div className="flex w-full max-w-full flex-col items-center gap-2 sm:gap-4">
+      <p className="max-w-full px-2 text-center text-xs font-medium text-neutral-700 sm:text-sm">
+        {statusMessage}
+      </p>
       {mustContinueFrom && turn === "red" && (
         <p className="text-xs text-amber-700">Continue your jump</p>
       )}
       <div
-        className={`inline-grid grid-cols-8 border-4 border-neutral-800 shadow-lg ${
+        className={`grid w-full max-w-[min(100%,28rem)] grid-cols-8 border-2 border-neutral-800 shadow-lg touch-manipulation sm:max-w-md sm:border-4 ${
           !interactive ? "opacity-95" : ""
         }`}
         role="grid"
@@ -86,28 +88,28 @@ export default function Board({
                     ? `${cell} at ${rowIndex + 1},${colIndex + 1}`
                     : `empty square ${rowIndex + 1},${colIndex + 1}`
                 }
-                className={`relative flex h-14 w-14 items-center justify-center transition-colors sm:h-16 sm:w-16 ${
+                className={`relative flex aspect-square w-full items-center justify-center transition-colors ${
                   !isDark
                     ? "cursor-default bg-amber-100"
                     : canClick
-                      ? `cursor-pointer bg-amber-800 hover:bg-amber-700 ${
+                      ? `cursor-pointer bg-amber-800 active:bg-amber-600 sm:hover:bg-amber-700 ${
                           isSelected || isContinuePiece
-                            ? "ring-4 ring-inset ring-yellow-300"
+                            ? "ring-2 ring-inset ring-yellow-300 sm:ring-4"
                             : ""
                         } ${isTarget ? "bg-amber-600" : ""}`
                       : "cursor-default bg-amber-800"
                 }`}
               >
                 {isTarget && !cell && (
-                  <span className="h-4 w-4 rounded-full bg-green-400/80 ring-2 ring-green-200" />
+                  <span className="h-[28%] w-[28%] min-h-2 min-w-2 rounded-full bg-green-400/80 ring-1 ring-green-200 sm:ring-2" />
                 )}
                 {cell && (
                   <span
-                    className={`pointer-events-none relative flex h-10 w-10 items-center justify-center rounded-full shadow-md sm:h-12 sm:w-12 ${PIECE_STYLES[cell]}`}
+                    className={`pointer-events-none relative flex h-[72%] w-[72%] items-center justify-center rounded-full shadow-md ${PIECE_STYLES[cell]}`}
                   >
                     {isKingPiece(cell) && (
                       <CrownIcon
-                        className={`h-5 w-5 sm:h-6 sm:w-6 ${
+                        className={`h-[58%] w-[58%] ${
                           cell === "red-king"
                             ? "text-amber-200"
                             : "text-amber-400"
