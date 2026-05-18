@@ -1,60 +1,50 @@
-# Checkers vs AI — Monorepo
+# Checkers vs AI
 
-Browser-based American checkers game with a **globally shared neural-network AI**. Every game played by any user is sent to a central server, which retrains the model so the AI improves for everyone.
+Browser-based American checkers game with a **self-learning AI opponent**. The AI starts weak and improves as you play — all learning happens locally in your browser using Minimax search and Temporal Difference learning. No server required.
 
 ```
 checkers-ai-engineering/
-├── frontend/   React + Vite + TF.js UI (deploy to Vercel / Netlify)
-└── server/     Express + TF.js Node backend (deploy to Railway / Render)
+└── frontend/   React + Vite UI (deploy to Vercel / Netlify)
 ```
 
-## Quick start (local)
-
-**Terminal 1 — start the server:**
-
-```bash
-cd server
-npm install
-npm run dev
-# Running at http://localhost:3001
-```
-
-**Terminal 2 — start the frontend:**
+## Quick start
 
 ```bash
 cd frontend
 npm install
-# .env.local already points to http://localhost:3001
 npm run dev
 # Open http://localhost:5173
 ```
 
-## Architecture
+## How the AI works
 
-```
-Browser  ──GET /model──────► Server (Express + TF.js Node)
-         ◄── weights ──────      │
-                                  │ trains on received games
-         ──POST /experiences──►   │ saves model to data/model/
-                                  │
-         ──GET /stats ────────►   └── data/experiences.json
-                                      data/meta.json
-```
+The AI (Black) uses **Minimax with Alpha-Beta pruning** (depth 2) to search ahead and pick the best move. Its evaluation function is a weighted combination of 8 board features:
 
-- The **server** owns and trains the model. Weights are stored on disk.
-- The **browser** downloads weights at startup, uses TF.js for inference, and POSTs game results after each game.
-- No local training happens in the browser — all learning is centralised.
+- Piece count and king count advantage
+- Piece advancement and center control
+- Back-row safety and mobility
+- Capture threats and trade management
+
+After each game, **Temporal Difference (TD) learning** adjusts the feature weights based on the outcome. Weights are saved to `localStorage` and persist between sessions.
+
+**Difficulty curve:**
+
+| Games played | AI level |
+|---|---|
+| 1–5 | Easy — high exploration, weak evaluation |
+| 6–14 | Noticeably harder — avoids blunders, prefers captures |
+| ~15 | Medium — consistent, punishes clear mistakes |
+| 25–30 | Intermediate — plans ahead, controls center |
 
 ## Deployment
 
-| Part | Host | Notes |
-|------|------|-------|
-| `frontend/` | Vercel / Netlify | Static site, set `VITE_API_URL` env var |
-| `server/` | Railway / Render | Needs a persistent volume at `/app/data` |
+The frontend is a fully static site — deploy to any static host:
 
-See each subdirectory's `README.md` for detailed deployment instructions.
+| Host | Notes |
+|------|-------|
+| Vercel | Recommended — set Root Directory to `frontend/` on import |
+| Netlify | Set publish directory to `frontend/dist` |
 
 ## Docs
 
 - [frontend/README.md](frontend/README.md) — UI setup, how to play, project structure
-- [server/README.md](server/README.md) — API endpoints, training loop, deployment

@@ -1,5 +1,0 @@
-{
-  "terminal.integrated.env.windows": {
-    "Path": "C:\\Program Files\\Git\\cmd;C:\\Program Files\\nodejs;C:\\Program Files\\vim\\vim92;${env:Path}"
-  }
-}
