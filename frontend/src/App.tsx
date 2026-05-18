@@ -1,10 +1,13 @@
-import type * as tf from "@tensorflow/tfjs";
 import { useCallback, useEffect, useRef, useState } from "react";
 import Board from "./components/Board";
-import { encodeBoard } from "./ai/encoding";
-import { postExperience, loadGamesPlayed, type GameExperience } from "./ai/experience";
-import { loadOrCreateModel } from "./ai/model";
+import { extractFeatures } from "./ai/features";
 import { chooseBlackMove, explorationRate } from "./ai/player";
+import {
+  loadAiState,
+  saveAiState,
+  tdUpdate,
+  type AiState,
+} from "./ai/weights";
 import {
   applyMove,
   createInitialBoard,
@@ -29,10 +32,7 @@ function randomFirstPlayer(): Player {
 }
 
 export default function App() {
-  const [model, setModel] = useState<tf.LayersModel | null>(null);
-  const [modelReady, setModelReady] = useState(false);
-  const [gamesPlayed, setGamesPlayed] = useState(0);
-  const [isSending, setIsSending] = useState(false);
+  const [aiState, setAiState] = useState<AiState>(() => loadAiState());
   const [aiThinking, setAiThinking] = useState(false);
   const [status, setStatus] = useState<GameStatus>("playing");
 
@@ -42,46 +42,44 @@ export default function App() {
   const [legalMoves, setLegalMoves] = useState<Move[]>([]);
   const [mustContinueFrom, setMustContinueFrom] = useState<Position | null>(null);
 
-  const modelRef = useRef<tf.LayersModel | null>(null);
-  const blackStatesRef = useRef<Float32Array[]>([]);
-  const gamesPlayedRef = useRef(0);
+  const aiStateRef = useRef<AiState>(aiState);
+  const blackFeaturesRef = useRef<Float32Array[]>([]);
   const statusRef = useRef<GameStatus>("playing");
   const aiRunningRef = useRef(false);
 
+  useEffect(() => { aiStateRef.current = aiState; }, [aiState]);
   useEffect(() => { statusRef.current = status; }, [status]);
-  useEffect(() => { gamesPlayedRef.current = gamesPlayed; }, [gamesPlayed]);
 
   const resetSelection = useCallback(() => {
     setSelected(null);
     setLegalMoves([]);
   }, []);
 
-  const finishGame = useCallback(async (winner: Player) => {
+  const finishGame = useCallback((winner: Player) => {
     setStatus(winner === "red" ? "red-wins" : "black-wins");
     setMustContinueFrom(null);
     resetSelection();
 
     const outcome = winner === "black" ? 1 : -1;
-    const states = blackStatesRef.current;
-    blackStatesRef.current = [];
+    const features = blackFeaturesRef.current;
+    blackFeaturesRef.current = [];
 
-    if (states.length > 0) {
-      const experience: GameExperience = { states, outcome };
-      setIsSending(true);
-      try {
-        await postExperience(experience);
-        const count = await loadGamesPlayed();
-        gamesPlayedRef.current = count;
-        setGamesPlayed(count);
-      } finally {
-        setIsSending(false);
-      }
-    }
+    setAiState((prev) => {
+      const newWeights = [...prev.weights];
+      tdUpdate(features, outcome, newWeights, prev.gamesPlayed);
+      const next: AiState = {
+        weights: newWeights,
+        gamesPlayed: prev.gamesPlayed + 1,
+      };
+      saveAiState(next);
+      aiStateRef.current = next;
+      return next;
+    });
   }, [resetSelection]);
 
   const runAiTurn = useCallback(
     async (startBoard: BoardState, continueFrom: Position | null) => {
-      if (!modelRef.current || statusRef.current !== "playing") return;
+      if (statusRef.current !== "playing") return;
       if (aiRunningRef.current) return;
 
       aiRunningRef.current = true;
@@ -93,21 +91,17 @@ export default function App() {
       try {
         while (statusRef.current === "playing") {
           if (getWinner(currentBoard, "black") === "red") {
-            await finishGame("red");
+            finishGame("red");
             return;
           }
 
-          blackStatesRef.current.push(encodeBoard(currentBoard));
+          blackFeaturesRef.current.push(extractFeatures(currentBoard));
 
-          const move = await chooseBlackMove(
-            modelRef.current,
-            currentBoard,
-            cont,
-            explorationRate(gamesPlayedRef.current),
-          );
+          const { weights, gamesPlayed } = aiStateRef.current;
+          const move = chooseBlackMove(currentBoard, cont, weights, gamesPlayed);
 
           if (!move) {
-            await finishGame("red");
+            finishGame("red");
             return;
           }
 
@@ -124,7 +118,7 @@ export default function App() {
           setMustContinueFrom(null);
 
           if (getWinner(currentBoard, "red") === "black") {
-            await finishGame("black");
+            finishGame("black");
             return;
           }
 
@@ -142,7 +136,7 @@ export default function App() {
   const startNewGame = useCallback(() => {
     const fresh = createInitialBoard();
     const first = randomFirstPlayer();
-    blackStatesRef.current = [];
+    blackFeaturesRef.current = [];
     setBoard(fresh);
     setTurn(first);
     setStatus("playing");
@@ -153,26 +147,16 @@ export default function App() {
   }, [resetSelection, runAiTurn]);
 
   useEffect(() => {
-    void (async () => {
-      const loadedModel = await loadOrCreateModel();
-      modelRef.current = loadedModel;
-      setModel(loadedModel);
-      setModelReady(true);
-
-      const count = await loadGamesPlayed();
-      gamesPlayedRef.current = count;
-      setGamesPlayed(count);
-
-      setTurn((current) => {
-        if (current === "black") void runAiTurn(createInitialBoard(), null);
-        return current;
-      });
-    })();
-  }, [runAiTurn]);
+    setTurn((current) => {
+      if (current === "black") void runAiTurn(createInitialBoard(), null);
+      return current;
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleSquareClick = useCallback(
     (row: number, col: number) => {
-      if (status !== "playing" || turn !== "red" || aiThinking || isSending) return;
+      if (status !== "playing" || turn !== "red" || aiThinking) return;
 
       const clicked: Position = { row, col };
       const piece = board[row][col];
@@ -195,7 +179,7 @@ export default function App() {
         resetSelection();
 
         if (getWinner(nextBoard, "black") === "red") {
-          void finishGame("red");
+          finishGame("red");
           return;
         }
 
@@ -216,22 +200,22 @@ export default function App() {
 
       resetSelection();
     },
-    [board, turn, status, selected, legalMoves, mustContinueFrom, aiThinking, isSending,
+    [board, turn, status, selected, legalMoves, mustContinueFrom, aiThinking,
       resetSelection, finishGame, runAiTurn],
   );
 
+  const { gamesPlayed } = aiState;
+
   const statusMessage =
     status === "red-wins"
-      ? "You win! Sending game to server…"
+      ? "You win!"
       : status === "black-wins"
-        ? "AI wins! Sending game to server…"
+        ? "AI wins!"
         : aiThinking
           ? "AI is thinking…"
-          : isSending
-            ? "Sending game to server…"
-            : turn === "red"
-              ? "Your turn (Red)"
-              : "AI is moving (Black)";
+          : turn === "red"
+            ? "Your turn (Red)"
+            : "AI is moving (Black)";
 
   return (
     <div className="flex min-h-dvh w-full max-w-full flex-col items-center justify-center gap-3 bg-neutral-100 px-3 py-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))] sm:gap-6 sm:px-4">
@@ -241,8 +225,10 @@ export default function App() {
           You play Red · AI plays Black
           <br className="sm:hidden" />
           <span className="hidden sm:inline"> · </span>
-          Global games played: {gamesPlayed}
-          {!modelReady && " · Loading model…"}
+          Games played: {gamesPlayed}
+          <span className="ml-2 opacity-60">
+            · Exploration: {(explorationRate(gamesPlayed) * 100).toFixed(0)}%
+          </span>
         </p>
       </div>
 
@@ -263,16 +249,11 @@ export default function App() {
         <button
           type="button"
           onClick={startNewGame}
-          disabled={aiThinking || isSending}
+          disabled={aiThinking}
           className="min-h-11 w-full max-w-xs rounded-lg bg-neutral-800 px-4 py-2.5 text-sm font-medium text-white active:bg-neutral-600 disabled:opacity-50 sm:w-auto sm:hover:bg-neutral-700"
         >
           New game
         </button>
-        {model && (
-          <span className="text-center text-xs text-neutral-500">
-            Exploration: {(explorationRate(gamesPlayed) * 100).toFixed(0)}%
-          </span>
-        )}
       </div>
     </div>
   );
