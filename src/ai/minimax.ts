@@ -10,7 +10,7 @@ import {
 import { extractFeatures } from "./features";
 import { evaluate } from "./weights";
 
-const DEPTH = 4;
+const DEPTH = 5;
 const WIN_SCORE = 1000;
 
 /**
