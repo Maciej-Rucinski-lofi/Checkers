@@ -6,6 +6,7 @@ import {
   loadAiState,
   saveAiState,
   tdUpdate,
+  syncTargetNetwork,
   type AiState,
 } from "./ai/weights";
 import {
@@ -66,9 +67,17 @@ export default function App() {
 
     setAiState((prev) => {
       const newWeights = [...prev.weights];
-      tdUpdate(features, outcome, newWeights, prev.gamesPlayed);
+      const newTargetWeights = [...prev.targetWeights];
+      const shouldSync = tdUpdate(features, outcome, newWeights, newTargetWeights, prev.gamesPlayed);
+      
+      // Sync target network if needed
+      if (shouldSync) {
+        syncTargetNetwork(newWeights, newTargetWeights);
+      }
+      
       const next: AiState = {
         weights: newWeights,
+        targetWeights: newTargetWeights,
         gamesPlayed: prev.gamesPlayed + 1,
       };
       saveAiState(next);
