@@ -1,19 +1,12 @@
 import { type BoardState, type Move, type Position } from "../game/checkers";
-import { bestBlackMove } from "./minimax";
-import { explorationRate } from "./weights";
+import { chooseBlackMove as chooseConfiguredBlackMove, type AiDifficulty } from "./aiPlayer";
 
-export { explorationRate };
+export type { AiDifficulty };
 
 export function chooseBlackMove(
   board: BoardState,
   continueFrom: Position | null,
-  weights: number[],
-  gamesPlayed: number,
+  difficulty: AiDifficulty = "medium",
 ): Move | null {
-  return bestBlackMove(
-    board,
-    weights,
-    continueFrom,
-    explorationRate(gamesPlayed),
-  );
+  return chooseConfiguredBlackMove(board, continueFrom, difficulty);
 }
