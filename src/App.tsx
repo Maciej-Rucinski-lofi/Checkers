@@ -1,12 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Board from "./components/Board";
-import { extractFeatures } from "./ai/features";
 import { chooseBlackMove, explorationRate } from "./ai/player";
 import {
   loadAiState,
   saveAiState,
-  tdUpdate,
-  syncTargetNetwork,
   type AiState,
 } from "./ai/weights";
 import {
@@ -44,7 +41,6 @@ export default function App() {
   const [mustContinueFrom, setMustContinueFrom] = useState<Position | null>(null);
 
   const aiStateRef = useRef<AiState>(aiState);
-  const blackFeaturesRef = useRef<Float32Array[]>([]);
   const statusRef = useRef<GameStatus>("playing");
   const aiRunningRef = useRef(false);
 
@@ -61,23 +57,10 @@ export default function App() {
     setMustContinueFrom(null);
     resetSelection();
 
-    const outcome = winner === "black" ? 1 : -1;
-    const features = blackFeaturesRef.current;
-    blackFeaturesRef.current = [];
-
     setAiState((prev) => {
-      const newWeights = [...prev.weights];
-      const newTargetWeights = [...prev.targetWeights];
-      const shouldSync = tdUpdate(features, outcome, newWeights, newTargetWeights, prev.gamesPlayed);
-      
-      // Sync target network if needed
-      if (shouldSync) {
-        syncTargetNetwork(newWeights, newTargetWeights);
-      }
-      
       const next: AiState = {
-        weights: newWeights,
-        targetWeights: newTargetWeights,
+        weights: prev.weights,
+        targetWeights: prev.targetWeights,
         gamesPlayed: prev.gamesPlayed + 1,
       };
       saveAiState(next);
@@ -103,8 +86,6 @@ export default function App() {
             finishGame("red");
             return;
           }
-
-          blackFeaturesRef.current.push(extractFeatures(currentBoard));
 
           const { weights, gamesPlayed } = aiStateRef.current;
           const move = chooseBlackMove(currentBoard, cont, weights, gamesPlayed);
@@ -145,7 +126,6 @@ export default function App() {
   const startNewGame = useCallback(() => {
     const fresh = createInitialBoard();
     const first = randomFirstPlayer();
-    blackFeaturesRef.current = [];
     setBoard(fresh);
     setTurn(first);
     setStatus("playing");
