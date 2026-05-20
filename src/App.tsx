@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Board from "./components/Board";
-import { chooseBlackMove, explorationRate } from "./ai/player";
+import {
+  AI_DEPTH_BY_DIFFICULTY,
+  chooseAiMoveAsync,
+  type AiDifficulty,
+} from "./ai/aiPlayer";
 import {
   loadAiState,
   saveAiState,
@@ -32,6 +36,7 @@ function randomFirstPlayer(): Player {
 export default function App() {
   const [aiState, setAiState] = useState<AiState>(() => loadAiState());
   const [aiThinking, setAiThinking] = useState(false);
+  const [difficulty, setDifficulty] = useState<AiDifficulty>("medium");
   const [status, setStatus] = useState<GameStatus>("playing");
 
   const [board, setBoard] = useState<BoardState>(createInitialBoard);
@@ -40,11 +45,9 @@ export default function App() {
   const [legalMoves, setLegalMoves] = useState<Move[]>([]);
   const [mustContinueFrom, setMustContinueFrom] = useState<Position | null>(null);
 
-  const aiStateRef = useRef<AiState>(aiState);
   const statusRef = useRef<GameStatus>("playing");
   const aiRunningRef = useRef(false);
 
-  useEffect(() => { aiStateRef.current = aiState; }, [aiState]);
   useEffect(() => { statusRef.current = status; }, [status]);
 
   const resetSelection = useCallback(() => {
@@ -64,7 +67,6 @@ export default function App() {
         gamesPlayed: prev.gamesPlayed + 1,
       };
       saveAiState(next);
-      aiStateRef.current = next;
       return next;
     });
   }, [resetSelection]);
@@ -87,8 +89,12 @@ export default function App() {
             return;
           }
 
-          const { weights, gamesPlayed } = aiStateRef.current;
-          const move = chooseBlackMove(currentBoard, cont, weights, gamesPlayed);
+          await delay(50);
+          const result = await chooseAiMoveAsync(currentBoard, cont, {
+            player: "black",
+            difficulty,
+          });
+          const move = result.move;
 
           if (!move) {
             finishGame("red");
@@ -120,7 +126,7 @@ export default function App() {
         setAiThinking(false);
       }
     },
-    [finishGame],
+    [difficulty, finishGame],
   );
 
   const startNewGame = useCallback(() => {
@@ -194,6 +200,7 @@ export default function App() {
   );
 
   const { gamesPlayed } = aiState;
+  const searchDepth = AI_DEPTH_BY_DIFFICULTY[difficulty];
 
   const statusMessage =
     status === "red-wins"
@@ -215,9 +222,7 @@ export default function App() {
           <br className="sm:hidden" />
           <span className="hidden sm:inline"> · </span>
           Games played: {gamesPlayed}
-          <span className="ml-2 opacity-60">
-            · Exploration: {(explorationRate(gamesPlayed) * 100).toFixed(0)}%
-          </span>
+          <span className="ml-2 opacity-60">· Depth: {searchDepth}</span>
         </p>
       </div>
 
@@ -235,6 +240,19 @@ export default function App() {
       </div>
 
       <div className="flex w-full max-w-md flex-col items-center gap-2 sm:flex-row sm:flex-wrap sm:justify-center sm:gap-3">
+        <label className="flex w-full max-w-xs items-center justify-between gap-3 rounded-lg bg-white px-3 py-2 text-sm font-medium text-neutral-700 shadow-sm sm:w-auto">
+          Difficulty
+          <select
+            value={difficulty}
+            onChange={(event) => setDifficulty(event.target.value as AiDifficulty)}
+            disabled={aiThinking}
+            className="rounded-md border border-neutral-300 bg-white px-2 py-1 text-neutral-900 disabled:opacity-50"
+          >
+            <option value="easy">Easy</option>
+            <option value="medium">Medium</option>
+            <option value="hard">Hard</option>
+          </select>
+        </label>
         <button
           type="button"
           onClick={startNewGame}
