@@ -2,6 +2,7 @@ import {
   applyMove,
   getAllLegalMoves,
   getWinner,
+  mustContinueJump,
   type BoardState,
   type Move,
   type Player,
@@ -10,11 +11,46 @@ import {
 import { extractFeatures } from "./features";
 import { evaluate } from "./weights";
 
-const DEPTH = 5;
+// Expert-level search depth: looks 7 plies ahead.
+// Forced multi-jumps do not hand the turn to the opponent, so tactical chains are searched correctly.
+// Transposition table caching makes this practical despite the exponential growth.
+const DEPTH = 7;
 const WIN_SCORE = 1000;
 
+// Transposition table: cache evaluated positions to avoid re-evaluation
+// Uses board hash as key for fast lookup
+type TranspositionEntry = { score: number; depth: number; flag: 'exact' | 'lower' | 'upper' };
+let transpositionTable: Map<string, TranspositionEntry> = new Map();
+
 /**
- * Picks the best move for Black using alpha-beta minimax with move ordering.
+ * Simple board hash for transposition table lookups.
+ * Converts board state to a compact string for caching.
+ */
+function hashBoard(
+  board: BoardState,
+  maximising: boolean,
+  continueFrom: Position | null,
+): string {
+  let hash = '';
+  for (let i = 0; i < 8; i++) {
+    for (let j = 0; j < 8; j++) {
+      const piece = board[i][j];
+      hash += piece === "black"
+        ? "b"
+        : piece === "black-king"
+          ? "B"
+          : piece === "red"
+            ? "r"
+            : piece === "red-king"
+              ? "R"
+              : ".";
+    }
+  }
+  return `${hash}|${maximising ? "b" : "r"}|${continueFrom?.row ?? "-"},${continueFrom?.col ?? "-"}`;
+}
+
+/**
+ * Picks the best move for Black using alpha-beta minimax with move ordering and transposition table.
  * Returns null if no moves are available (Black has lost).
  */
 export function bestBlackMove(
@@ -23,6 +59,9 @@ export function bestBlackMove(
   continueFrom: Position | null,
   epsilon: number,
 ): Move | null {
+  // Clear transposition table for each new move decision
+  transpositionTable.clear();
+
   const moves = getAllLegalMoves(board, "black", continueFrom);
   if (moves.length === 0) return null;
 
@@ -41,7 +80,16 @@ export function bestBlackMove(
 
   for (const move of sortedMoves) {
     const next = applyMove(board, move);
-    const score = minimax(next, DEPTH - 1, alpha, beta, false, weights);
+    const mustContinue = mustContinueJump(next, move);
+    const score = minimax(
+      next,
+      mustContinue ? DEPTH : DEPTH - 1,
+      alpha,
+      beta,
+      mustContinue,
+      weights,
+      mustContinue ? move.to : null,
+    );
     if (score > bestScore) {
       bestScore = score;
       bestMove = move;
@@ -70,8 +118,9 @@ function sortMoves(moves: Move[]): Move[] {
 }
 
 /**
- * Standard minimax with alpha-beta pruning.
+ * Standard minimax with alpha-beta pruning and transposition table.
  * maximising = true means it is Black's turn (AI).
+ * Cached positions are reused to dramatically speed up deep search.
  */
 function minimax(
   board: BoardState,
@@ -80,7 +129,21 @@ function minimax(
   beta: number,
   maximising: boolean,
   weights: number[],
+  continueFrom: Position | null = null,
 ): number {
+  const originalAlpha = alpha;
+  const originalBeta = beta;
+  const boardHash = hashBoard(board, maximising, continueFrom);
+
+  // Check transposition table for cached evaluation
+  const cached = transpositionTable.get(boardHash);
+  if (cached && cached.depth >= depth) {
+    if (cached.flag === 'exact') return cached.score;
+    if (cached.flag === 'lower') alpha = Math.max(alpha, cached.score);
+    if (cached.flag === 'upper') beta = Math.min(beta, cached.score);
+    if (alpha >= beta) return cached.score;
+  }
+
   const currentPlayer: Player = maximising ? "black" : "red";
   const winner = getWinner(board, currentPlayer);
 
@@ -91,7 +154,7 @@ function minimax(
     return evaluate(extractFeatures(board), weights);
   }
 
-  const moves = getAllLegalMoves(board, currentPlayer);
+  const moves = getAllLegalMoves(board, currentPlayer, continueFrom);
   if (moves.length === 0) {
     return maximising ? -WIN_SCORE : WIN_SCORE;
   }
@@ -99,25 +162,57 @@ function minimax(
   // Sort moves for better pruning (especially at root).
   const sortedMoves = sortMoves(moves);
 
+  let score: number;
   if (maximising) {
     let best = -Infinity;
     for (const move of sortedMoves) {
       const next = applyMove(board, move);
-      const score = minimax(next, depth - 1, alpha, beta, false, weights);
-      best = Math.max(best, score);
-      const newAlpha = Math.max(alpha, best);
-      if (beta <= newAlpha) break;
+      const mustContinue = mustContinueJump(next, move);
+      const evalScore = minimax(
+        next,
+        mustContinue ? depth : depth - 1,
+        alpha,
+        beta,
+        mustContinue,
+        weights,
+        mustContinue ? move.to : null,
+      );
+      best = Math.max(best, evalScore);
+      alpha = Math.max(alpha, best);
+      if (beta <= alpha) break;
     }
-    return best;
+    score = best;
   } else {
     let best = Infinity;
     for (const move of sortedMoves) {
       const next = applyMove(board, move);
-      const score = minimax(next, depth - 1, alpha, beta, true, weights);
-      best = Math.min(best, score);
-      const newBeta = Math.min(beta, best);
-      if (newBeta <= alpha) break;
+      const mustContinue = mustContinueJump(next, move);
+      const evalScore = minimax(
+        next,
+        mustContinue ? depth : depth - 1,
+        alpha,
+        beta,
+        !mustContinue,
+        weights,
+        mustContinue ? move.to : null,
+      );
+      best = Math.min(best, evalScore);
+      beta = Math.min(beta, best);
+      if (beta <= alpha) break;
     }
-    return best;
+    score = best;
   }
+
+  // Store in transposition table with appropriate flag
+  let flag: 'exact' | 'lower' | 'upper';
+  if (score <= originalAlpha) {
+    flag = 'upper';
+  } else if (score >= originalBeta) {
+    flag = 'lower';
+  } else {
+    flag = 'exact';
+  }
+
+  transpositionTable.set(boardHash, { score, depth, flag });
+  return score;
 }
